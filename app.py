@@ -24,7 +24,7 @@ def carica_dati_da_github(url):
 st.sidebar.subheader("📄 File delle estrazioni")
 url_file = st.sidebar.text_input(
     "Inserisci l'URL RAW del file delle estrazioni SuperEnalotto da GitHub:",
-    "https://raw.githubusercontent.com/Operaio74/superenalotto-app/refs/heads/main/estrazioni_2025.txt"
+    "https://raw.githubusercontent.com/Operaio74/superenalotto-app/refs/heads/main/estrazioni_202025.txt"
 )
 
 if url_file:
