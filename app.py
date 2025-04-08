@@ -1,78 +1,87 @@
 import streamlit as st
 import pandas as pd
 import random
-import requests
-from io import StringIO
+from datetime import datetime
 
-st.set_page_config(page_title="SuperEnalotto App", layout="wide")
-st.title("🎯 SuperEnalotto - Analisi e Generazione Combinazioni")
+st.set_page_config(page_title="SuperEnalotto App", page_icon="🎰", layout="centered")
 
-# --- Funzione per caricare i dati da GitHub ---
-def carica_dati_da_github(url):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data_txt = StringIO(response.text)
-        df = pd.read_csv(data_txt, sep=" ", header=None)
-        df.columns = ["Data", "N1", "N2", "N3", "N4", "N5", "N6", "Jolly", "Superstar"]
-        return df
-    except Exception as e:
-        st.error(f"Errore nel caricamento del file: {e}")
-        return None
+st.title("🎰 SuperEnalotto: Analisi e Generazione Combinazioni")
 
-# --- URL del file TXT su GitHub ---
-st.sidebar.subheader("📄 File delle estrazioni")
-url_file = st.sidebar.text_input(
-    "Inserisci l'URL RAW del file delle estrazioni SuperEnalotto da GitHub:",
-    "https://raw.githubusercontent.com/Operaio74/superenalotto-app/refs/heads/main/estrazioni_2025.txt"
-)
+uploaded_file = st.file_uploader("Carica un file TXT con le estrazioni", type="txt")
 
-if url_file:
-    df = carica_dati_da_github(url_file)
-    if df is not None:
-        st.success("✅ File caricato correttamente!")
+def parse_data(file):
+    lines = file.getvalue().decode("utf-8").splitlines()
+    data = []
+    for line in lines:
+        parts = line.strip().split()
+        if len(parts) == 9:
+            try:
+                row = {
+                    "data": datetime.strptime(parts[0], "%d/%m/%Y"),
+                    "n1": int(parts[1]), "n2": int(parts[2]), "n3": int(parts[3]),
+                    "n4": int(parts[4]), "n5": int(parts[5]), "n6": int(parts[6]),
+                    "jolly": int(parts[7]), "superstar": int(parts[8])
+                }
+                data.append(row)
+            except ValueError:
+                continue
+    return pd.DataFrame(data)
 
-        # --- Mostra le prime righe del DataFrame ---
-        with st.expander("📊 Anteprima estrazioni"):
-            st.dataframe(df.head(10), use_container_width=True)
+def frequenze_numeri(df):
+    tutti_numeri = df[["n1", "n2", "n3", "n4", "n5", "n6"]].values.flatten()
+    return pd.Series(tutti_numeri).value_counts().sort_index()
 
-        # --- Calcolo dei ritardi per ciascun numero ---
-        tutti_numeri = list(range(1, 91))
-        ultimi_numeri = df[["N1", "N2", "N3", "N4", "N5", "N6"]].values[::-1]
-        ritardi = {n: 0 for n in tutti_numeri}
+def numeri_ritardatari(df):
+    tutti_numeri = set(range(1, 91))
+    ultime_uscite = {n: None for n in tutti_numeri}
+    for index, row in df[::-1].iterrows():
+        estratti = set(row[["n1", "n2", "n3", "n4", "n5", "n6"]])
+        for n in estratti:
+            if ultime_uscite[n] is None:
+                ultime_uscite[n] = row["data"]
+    oggi = df["data"].max()
+    ritardi = {n: (oggi - ultime_uscite[n]).days if ultime_uscite[n] else float("inf") for n in tutti_numeri}
+    return pd.Series(ritardi).sort_values(ascending=False)
 
-        for estrazione in ultimi_numeri:
-            for numero in tutti_numeri:
-                if numero not in estrazione:
-                    ritardi[numero] += 1
-                else:
-                    ritardi[numero] = 0
+def genera_combinazioni(freq, include_rit, exclude_rit, n_comb):
+    popolazione = list(freq.index)
+    if include_rit:
+        popolazione = include_rit + [n for n in popolazione if n not in include_rit]
+    if exclude_rit:
+        popolazione = [n for n in popolazione if n not in exclude_rit]
+    combinazioni = []
+    for _ in range(n_comb):
+        combinazioni.append(sorted(random.sample(popolazione, 6)))
+    return combinazioni
 
-        ritardi_ordinati = sorted(ritardi.items(), key=lambda x: x[1], reverse=True)
+if uploaded_file:
+    df = parse_data(uploaded_file)
+    st.success(f"File caricato con {len(df)} estrazioni.")
 
-        # --- Parametri utente ---
-        st.sidebar.subheader("⚙️ Parametri combinazione")
-        num_combinazioni = st.sidebar.slider("Numero di combinazioni da generare", 1, 10, 5)
-        num_ritardatari = st.sidebar.slider("Quanti ritardatari considerare?", 0, 30, 10)
-        azione_ritardatari = st.sidebar.radio("Vuoi includere o escludere i ritardatari?", ["Includi", "Escludi"])
+    st.subheader("📊 Statistiche")
+    freq = frequenze_numeri(df)
+    ritardi = numeri_ritardatari(df)
 
-        numeri_ritardatari = [n for n, _ in ritardi_ordinati[:num_ritardatari]]
+    st.write("**Top 10 Numeri più frequenti:**")
+    st.dataframe(freq.sort_values(ascending=False).head(10))
 
-        # --- Generazione combinazioni ---
-        def genera_combinazione():
-            pool = [n for n in tutti_numeri if (n in numeri_ritardatari) == (azione_ritardatari == "Includi")]
-            return sorted(random.sample(pool, 6)) if len(pool) >= 6 else []
+    st.write("**Top 10 Numeri più ritardatari:**")
+    st.dataframe(ritardi.head(10))
 
-        st.subheader("🎰 Combinazioni Generate")
-        for i in range(num_combinazioni):
-            combinazione = genera_combinazione()
-            if combinazione:
-                st.success(f"Combinazione {i+1}: {combinazione}")
-            else:
-                st.error("⚠️ Non ci sono abbastanza numeri per generare una combinazione. Riduci i filtri sui ritardatari.")
+    st.subheader("🎲 Generatore Combinazioni")
 
-        # --- Mostra ritardatari
-        with st.expander("🔎 Ritardatari attuali"):
-            st.table(pd.DataFrame(ritardi_ordinati[:30], columns=["Numero", "Ritardo"]))
-    else:
-        st.warning("⚠️ Controlla l'URL del file delle estrazioni.")
+    n_rit_include = st.slider("Includi quanti numeri più ritardatari?", 0, 20, 0)
+    n_rit_exclude = st.slider("Escludi quanti numeri più ritardatari?", 0, 20, 0)
+    n_comb = st.number_input("Numero di combinazioni da generare", min_value=1, max_value=20, value=5)
+
+    rit_include = list(ritardi.head(n_rit_include).index)
+    rit_exclude = list(ritardi.head(n_rit_exclude).index)
+
+    if st.button("Genera combinazioni"):
+        combs = genera_combinazioni(freq, rit_include, rit_exclude, n_comb)
+        st.write("**Combinazioni generate:**")
+        for i, c in enumerate(combs, 1):
+            st.markdown(f"**{i}**: `{c}`")
+
+else:
+    st.info("Carica un file per iniziare. Formato: `data n1 n2 n3 n4 n5 n6 jolly superstar`")
